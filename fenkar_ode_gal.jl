@@ -1,5 +1,5 @@
 include("./exportData.jl")
-using .exportData, DifferentialEquations, DiffEqParamEstim, PyPlot, NLopt, DelimitedFiles
+using .exportData, DifferentialEquations, DiffEqParamEstim, PyPlot, GalacticOptim, BlackBoxOptim, DelimitedFiles
 
 # define fenkar system
 function H(x;k=100.0)
@@ -57,40 +57,23 @@ upper = [ 50.0,  50.0, 2000.0,   4.33, 50.0, 1000.0, 0.50, 50.0,  50.0, 11.0, 0.
 @assert all(p .>= lower) && all(p .<= upper)
 
 # fit
-opt = Opt(:GN_ISRES, length(p))	# global
-min_objective!(opt, cost_function)
-lower_bounds!(opt,lower)
-upper_bounds!(opt,upper)
-maxeval!(opt, Int(1e5))
-(minf,minx,ret) = NLopt.optimize(opt,p)
-
+optprob = GalacticOptim.OptimizationProblem(cost_function, p, lb = lower, ub = upper)
+result = solve(optprob, BBO())
+result = bboptimize(cost_function; SearchRange = bound, MaxSteps = 1e5)#, NThreads=Threads.nthreads()-1)
 @info "Initial p = $(p) \n"
-@info "Minimizer = $(minx) \n"
-prob = remake(prob, p=minx)
+@info "Minimizer = $(result.archive_output.best_candidate) \n"
+prob = remake(prob, p=result.archive_output.best_candidate)
 sol = solve(prob, Tsit5(); saveat=t, save_idxs=1:1)
-plt.plot(sol.t, sol[1,:], "--", label="GN_ISRES Parameters")
+plt.plot(sol.t, sol[1,:], "--", label="BBO Parameters")
 
-opt = Opt(:LN_BOBYQA, length(p))	# local
-min_objective!(opt, cost_function)
-lower_bounds!(opt,lower)
-upper_bounds!(opt,upper)
-maxeval!(opt, Int(1e5))
-(minf,minx,ret) = NLopt.optimize(opt,minx)
-
-@info "Initial p = $(p) \n"
-@info "Minimizer = $(minx) \n"
-prob = remake(prob, p=minx)
-sol = solve(prob, Tsit5(); saveat=t, save_idxs=1:1)
-plt.plot(sol.t, sol[1,:], "--", label="LN_BOBYQA Parameters")
-
-plt.savefig("./ode/nlopt/$(ind)_fittings.pdf")
+plt.savefig("./ode/bbo/$(ind)_fittings.pdf")
 plt.close()
 
-open("./ode/nlopt/$(ind)_params.txt", "w") do io
+open("./ode/bbo/$(ind)_params.txt", "w") do io
 	writedlm(io, ["tsi" "tv1m" "tv2m" "tvp" "twm" "twp" "td" "to" "tr" "xk" "uc" "uv" "ucsi" "t0" "TI" "IA"])
 	writedlm(io, "\n")
 	writedlm(io, transpose(p))
 	writedlm(io, "\n")
-	writedlm(io, transpose(minx))
+	writedlm(io, transpose(result.archive_output.best_candidate))
 end
 
